@@ -1,0 +1,105 @@
+name: Package and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'tag'
+        required: true
+        default: 'latest'
+      release_name:
+        description: 'Release Title'
+        required: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 必须赋予写权限，否则无法 push 代码和创建 release
+
+    steps:
+      - name: Check Out
+        uses: actions/checkout@v4
+        with:
+          # 默认只拉取最新的一次 commit，我们需要确保能正常 push
+          fetch-depth: 0
+
+      # 1. 解析 manifest.json 获取版本信息和注册名称
+      - name: Parse Manifest Info
+        id: manifest
+        run: |
+          if [ ! -f "manifest.json" ]; then
+            echo "Error: manifest.json not found!"
+            exit 1
+          fi
+
+          REG_NAME=$(jq -r '.registerName' manifest.json)
+          VERSION_CODE=$(jq -r '.versionCode' manifest.json)
+          VERSION_NAME=$(jq -r '.versionName' manifest.json)
+
+          echo "reg_name=$REG_NAME" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+
+      # 2. 打包扩展包（协议文件 + LICENSE；应用只读取协议规定路径，多余文件会被忽略）
+      - name: ZIP Extension Pack
+        run: |
+          mkdir -p downloads
+          ZIP_NAME="${{ steps.manifest.outputs.reg_name }}_v${{ steps.manifest.outputs.version_name }}.zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          # 打包 manifest.json / substances/ / i18n/ / LICENSE（及可选的 icon.png 等协议内文件），
+          # 排除 .git、.github、downloads/ 以及仓库辅助文件
+          zip -r "downloads/$ZIP_NAME" . \
+            -x "*.git*" ".github/*" "downloads/*" "README.md" "CMAKE"
+
+      # 3. 计算 zip 的 SHA-256（v2 协议要求，缺少 sha256 的更新条目会被应用忽略）
+      - name: Compute SHA-256
+        id: sha256
+        run: |
+          SHA256=$(sha256sum "downloads/${{ env.ZIP_NAME }}" | awk '{print $1}')
+          echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+
+      # 4. 更新 update.json（写入 versionCode 对应的条目，含 sha256）
+      - name: Update update.json
+        run: |
+          UPDATE_FILE="downloads/update.json"
+
+          DOWNLOAD_URL="${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.event.inputs.tag_name }}/${{ env.ZIP_NAME }}"
+
+          if [ ! -f "$UPDATE_FILE" ]; then
+            echo "{}" > "$UPDATE_FILE"
+          fi
+
+          V_CODE="${{ steps.manifest.outputs.version_code }}"
+          V_NAME="${{ steps.manifest.outputs.version_name }}"
+
+          jq --arg code "$V_CODE" \
+             --arg name "$V_NAME" \
+             --arg url "$DOWNLOAD_URL" \
+             --arg sha "${{ steps.sha256.outputs.sha256 }}" \
+             '.[$code] = {"versionName": $name, "url": $url, "sha256": $sha}' "$UPDATE_FILE" > temp.json && mv temp.json "$UPDATE_FILE"
+
+      # 5. 提交修改后的 update.json 并推送到仓库
+      - name: Commit & Push update.json
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add downloads/update.json
+
+          if ! git diff --cached --exit-code; then
+            git commit -m "chore: auto update update.json for version ${{ steps.manifest.outputs.version_name }}"
+            git push origin HEAD:${{ github.ref }}
+          else
+            echo "No changes in update.json, skipping commit."
+          fi
+
+      # 6. 发布到 GitHub Release
+      - name: Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "downloads/*"
+          tag: ${{ github.event.inputs.tag_name }}
+          name: ${{ github.event.inputs.release_name || github.event.inputs.tag_name }}
+          generateReleaseNotes: true
+          allowUpdates: true
