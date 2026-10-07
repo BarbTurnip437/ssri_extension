@@ -1,0 +1,31 @@
+{
+  "name": "Sertraline",
+  "commonNames": [
+    "Sertraline",
+    "zoloft",
+    "lustral"
+  ],
+  "url": "https://en.wikipedia.org/wiki/Sertraline",
+  "isApproved": false,
+  "addictionPotential": "non-addicting",
+  "categories": [
+    "antidepressant",
+    "ssri"
+  ],
+  "roas": [
+    {
+      "name": "oral",
+      "dose": {
+        "units": "mg",
+        "lightMin": 50.0,
+        "commonMin": 100.0,
+        "strongMin": 150.0,
+        "heavyMin": 200.0
+      }
+    }
+  ],
+  "metabolism": "Initial N-demethylation forms less active N-desmethylsertraline. Further deamination, reduction, hydroxylation and glucuronidation precede elimination in urine and feces. Multiple enzymes participate; the reviewed label does not identify one exclusive CYP pathway.",
+  "metabolismSources": [
+    "https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=7d598f1a-6c76-458a-a155-7a6a0743a2d3"
+  ]
+}
